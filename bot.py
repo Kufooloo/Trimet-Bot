@@ -6,6 +6,7 @@ from discord.commands import option
 import requests
 import pandas
 import json
+import datetime
 
 ROUTES_LIST = []
 STOPS_LIST = []
@@ -55,7 +56,18 @@ def generate_stop_id_list(id_list) -> dict:
                 for stop in stop_list:
                     
                     print(stop)
-                    stop_id_dict.update({stop.get('desc'):stop.get('locid')})
+                    dict_stop = stop_id_dict.get(stop.get('desc'))
+                    print(dict_stop)
+                    if dict_stop is None:
+                        temp = []
+                        temp.append(stop.get('locid'))
+                        stop_id_dict.update({stop.get('desc'):temp})
+                    else:
+                        temp = dict_stop
+                        print(temp)
+                        temp.append(stop.get('locid'))
+                        stop_id_dict.update({stop.get('desc'):temp})
+    print(stop_id_dict)
     return stop_id_dict
 
 
@@ -140,44 +152,48 @@ class TriMet(commands.Cog):
     @commands.slash_command()
     @option("stop", description="Name of the Stop", autocomplete=discord.utils.basic_autocomplete(STOP_LIST))
     async def schedule(self, ctx, stop):
+        now = datetime.datetime.now()
         stop_id = STOP_ID_LIST.get(stop)
-        r = requests.get(f"{arrivals_url}/appid/{appid}/locIDs/{stop_id}")
-        resultSet = r.json().get('resultSet')
-        if resultSet.get('errorMessage') is not None:
-            await ctx.respond(resultSet.get('errorMessage'))
-            return
-        print(resultSet)
-        arrival = resultSet.get('arrival')
-        print(f"\narrival: {arrival}")
-        arrival_list = []
-        for item in arrival:
-            print(f"\n{item}")
-            temp = {}
-            temp.update({'scheduled':item.get('scheduled')})
-            temp.update({'departed':item.get('departed')})
-            temp.update({'status':item.get('status')})
-            if item.get('detoured') is not None:
-                temp.update({'detour':item.get('detour')})
-            arrival_list.append(temp)
-        print(arrival_list)
+        for stop_from_list in stop_id:
+            r = requests.get(f"{arrivals_url}/appid/{appid}/locIDs/{stop_from_list}")
+            resultSet = r.json().get('resultSet')
+            if resultSet.get('errorMessage') is not None:
+                await ctx.respond(resultSet.get('errorMessage'))
+                return
+            print(resultSet)
+            arrival = resultSet.get('arrival')
+            print(f"\narrival: {arrival}")
+            arrival_list = []
+            for item in arrival:
+                print(f"\n{item}")
+                temp = {}
+                temp.update({'scheduled':item.get('scheduled')})
+                temp.update({'departed':item.get('departed')})
+                temp.update({'shortSign':item.get('shortSign')})
+                temp.update({'status':item.get('status')})
+                if item.get('detoured') is not None:
+                    temp.update({'detour':item.get('detour')})
+                arrival_list.append(temp)
+            print(arrival_list)
 
-        message_embed = discord.Embed(title=stop)
-        for arrival_info in arrival_list:
-            title = f"Arriving: <t:{str(arrival_info.get('scheduled'))[:10]}:R>"
-            if arrival_info.get('detour') is not None:
-                detour = resultSet.get('detour')
-                if detour is None:
-                    body = "Detoured"
+            message_embed = discord.Embed(title=stop)
+            for arrival_info in arrival_list:
+                title = f"{arrival_info.get('shortSign')} Arriving: <t:{str(arrival_info.get('scheduled'))[:10]}:R>"
+                if arrival_info.get('detour') is not None:
+                    detour = resultSet.get('detour')
+                    if detour is None:
+                        body = "Detoured"
+                    else:
+                        detourid = arrival_info.get('detour')
+                        for detour_item in detour:
+                            if check_list(detour_item.get('id'),detourid):
+                                body = f"Detoured: {detour_item.get('desc')}"
                 else:
-                    detourid = arrival_info.get('detour')
-                    for detour_item in detour:
-                        if check_list(detour_item.get('id'),detourid):
-                            body = f"Detoured: {detour_item.get('desc')}"
-            else:
-                body = f"Status: {arrival_info.get('status')}"
-            message_embed.add_field(name=title, value=body)
-        
-        await ctx.respond(embed= message_embed)
+                    body = f"Status: {arrival_info.get('status')}"
+                
+                if arrival_info.get('scheduled') > now.timestamp():
+                    message_embed.add_field(name=title, value=body)        
+            await ctx.respond(embed= message_embed)
 
 
 def check_list(id, list):
